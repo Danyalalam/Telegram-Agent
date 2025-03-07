@@ -1,6 +1,6 @@
 import asyncio
 import uvicorn
-from src.bot.telegram_bot import create_application, ai_service
+from src.agent.telegram_bot import create_application, ai_service
 from src.api.routes import app as fastapi_app
 from src.database.models import init_db
 from src.services.scheduler import TipsScheduler
