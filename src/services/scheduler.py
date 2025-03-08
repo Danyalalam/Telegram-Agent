@@ -43,7 +43,7 @@ class TipsScheduler:
             
             # Determine which topic to use based on day of week
             day_of_week = datetime.now().weekday()
-            topics = ['feng_shui', 'mbti', 'mythology']
+            topics = ['feng_shui', 'mbti', 'iching', 'bazi', 'ziwei']
             topic = topics[day_of_week % len(topics)]
             
             # Generate tip using AI
@@ -51,9 +51,17 @@ class TipsScheduler:
             tip = await self.ai_service.generate_response(topic, tip_prompt)
             
             # Format the tip with emojis
-            topic_emojis = {"feng_shui": "🏠", "mbti": "🧠", "mythology": "🔮"}
+            topic_emojis = {
+                "feng_shui": "🏠", 
+                "mbti": "🧠", 
+                "iching": "🔮",
+                "bazi": "🌙",
+                "ziwei": "⭐"
+            }
             emoji = topic_emojis.get(topic, "💬")
-            formatted_tip = f"{emoji} *Daily {topic.replace('_', ' ').title()} Tip* {emoji}\n\n{tip}"
+            
+            # Use HTML formatting instead of Markdown for consistency
+            formatted_tip = f"{emoji} <b>Daily {topic.replace('_', ' ').title()} Tip</b> {emoji}\n\n{tip}"
             
             # Send to each subscribed user
             for user in subscribed_users:
@@ -61,11 +69,22 @@ class TipsScheduler:
                     await self.application.bot.send_message(
                         chat_id=user.telegram_id,
                         text=formatted_tip,
-                        parse_mode='Markdown'
+                        parse_mode='HTML'
                     )
                     logger.info(f"Sent daily tip to user {user.telegram_id}")
                 except Exception as e:
                     logger.error(f"Failed to send tip to user {user.telegram_id}: {e}")
+                    
+                    # Fallback to plain text if HTML parsing fails
+                    try:
+                        plain_text = formatted_tip.replace('<b>', '').replace('</b>', '')
+                        await self.application.bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=plain_text
+                        )
+                        logger.info(f"Sent fallback plain text tip to user {user.telegram_id}")
+                    except Exception as e2:
+                        logger.error(f"Failed to send fallback tip to user {user.telegram_id}: {e2}")
                 
                 # Add delay to avoid hitting rate limits
                 await asyncio.sleep(0.1)

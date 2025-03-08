@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 genai.configure(api_key=GEMINI_API_KEY)
 
 class AIService:
-    # Add this to your AIService class:
     def __init__(self):
         # Define generation config for more context retention
         generation_config = {
@@ -69,14 +68,24 @@ class AIService:
                 f"You are an MBTI personality type expert. Provide helpful, accurate information "
                 f"about MBTI personality types in response to this query. Keep your response concise: {query}"
             ),
-            "mythology": (
-                f"You are a mythology expert. Provide helpful, accurate information about "
-                f"mythology from various cultures in response to this query. Keep your response concise: {query}"
+            "iching": (
+                f"You are an I-Ching oracle expert. Provide helpful, accurate interpretation of "
+                f"hexagrams and I-Ching wisdom in response to this query. Keep your response concise: {query}"
+            ),
+            "bazi": (
+                f"You are a Ba Zi (Four Pillars) expert. Provide helpful, accurate Chinese birth chart "
+                f"analysis and interpretations in response to this query. Keep your response concise: {query}"
+            ),
+            "ziwei": (
+                f"You are a Zi Wei Dou Shu (Purple Star Astrology) expert. Provide helpful, accurate "
+                f"interpretations of star positions and palace influences in response to this query. "
+                f"Keep your response concise: {query}"
             ),
             "general": (
-                f"You are an AI assistant specializing in Feng Shui, MBTI personality types, and mythology. "
-                f"If this query relates to one of these topics, provide relevant information. "
-                f"If not, politely explain that you focus on these three domains. Keep responses concise: {query}"
+                f"You are an AI assistant specializing in Chinese metaphysics (Feng Shui, I-Ching, Ba Zi, "
+                f"Zi Wei Dou Shu) and MBTI personality types. If this query relates to one of these topics, "
+                f"provide relevant information. If not, politely explain that you focus on these domains. "
+                f"Keep responses concise: {query}"
             )
         }
         
