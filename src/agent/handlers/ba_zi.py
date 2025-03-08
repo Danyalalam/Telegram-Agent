@@ -169,13 +169,13 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
     
     # Format the chart for display
     chart = (
-        f"*Year Pillar:* {year_pillar['stem']} ({year_pillar['stem_element']}) {year_pillar['branch']} "
+        f"Year Pillar: {year_pillar['stem']} ({year_pillar['stem_element']}) {year_pillar['branch']} "
         f"({year_pillar['branch_element']}) - {year_pillar['animal']}\n"
-        f"*Month Pillar:* {month_pillar['stem']} ({month_pillar['stem_element']}) {month_pillar['branch']} "
+        f"Month Pillar: {month_pillar['stem']} ({month_pillar['stem_element']}) {month_pillar['branch']} "
         f"({month_pillar['branch_element']})\n"
-        f"*Day Pillar:* {day_pillar['stem']} ({day_pillar['stem_element']}) {day_pillar['branch']} "
+        f"Day Pillar: {day_pillar['stem']} ({day_pillar['stem_element']}) {day_pillar['branch']} "
         f"({day_pillar['branch_element']})\n"
-        f"*Day Master:* {day_master}"
+        f"Day Master: {day_master}"
     )
     
     # Count elements for basic analysis
@@ -212,14 +212,22 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
         ai_service = get_ai_service()
         response = await ai_service.generate_response('bazi', user_query, update.effective_user.id)
         
+        # Store the assessment context for follow-up questions
+        context_summary = (
+            f"Ba Zi reading for {user_name}, born on {birth['year']}-{birth['month']}-{birth['day']}. "
+            f"Day Master: {day_master}. Chart shows: {elements['Wood']} Wood, {elements['Fire']} Fire, "
+            f"{elements['Earth']} Earth, {elements['Metal']} Metal, {elements['Water']} Water."
+        )
+        ai_service.store_assessment_result(update.effective_user.id, 'bazi', context_summary)
+        
         # Add personal touches to the response
         personalized_response = (
-            f"🌙 *{user_name}'s Ba Zi (Four Pillars) Chart* 🌙\n\n"
+            f"🌙 <b>{user_name}'s Ba Zi (Four Pillars) Chart</b> 🌙\n\n"
             f"{chart}\n\n"
-            f"*Element Balance:*\n"
+            f"<b>Element Balance:</b>\n"
             f"Wood: {elements['Wood']}, Fire: {elements['Fire']}, Earth: {elements['Earth']}, "
             f"Metal: {elements['Metal']}, Water: {elements['Water']}\n\n"
-            f"*Your Personal Reading:*\n\n"
+            f"<b>Your Personal Reading:</b>\n\n"
             f"{response}\n\n"
             f"Would you like more specific information about your favorable directions, "
             f"colors, or career paths based on your Ba Zi chart?"
@@ -238,7 +246,7 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
             db.close()
         
         # Send the response
-        await update.message.reply_text(personalized_response, parse_mode="Markdown")
+        await update.message.reply_text(personalized_response, parse_mode="HTML")
         
         return ConversationHandler.END
         

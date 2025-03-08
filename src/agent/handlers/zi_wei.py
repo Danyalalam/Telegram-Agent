@@ -193,63 +193,87 @@ async def generate_zi_wei_results(update: Update, context: ContextTypes.DEFAULT_
     user_name = assessment['name']
     birth = assessment['birth_info']
     
-    # Calculate Zi Wei chart (simplified)
-    ming_gong_index = calculate_ming_gong(birth['year'], birth['month'], birth['day'], birth['hour'])
-    stars = calculate_main_stars(ming_gong_index, birth['year'], birth['month'], birth['day'], birth['hour'])
-    
-    # Create chart representation
-    chart = {}
-    for palace_idx, palace in enumerate(PALACES):
-        chart[palace] = []
-    
-    # Place stars in palaces
-    for star, pos in stars.items():
-        chart[PALACES[pos]].append(star)
-    
-    # Format the chart for display
-    chart_text = "*Your Zi Wei Dou Shu Chart*\n\n"
-    chart_text += f"Life Palace (Ming Gong): {EARTHLY_BRANCHES[ming_gong_index]}\n\n"
-    
-    for palace, palace_stars in chart.items():
-        if palace_stars:
-            chart_text += f"*{palace} Palace:* {', '.join(palace_stars)}\n"
-    
-    # Show typing indicator
-    await update.message.chat.send_action(action=ChatAction.TYPING)
-    
-    # Store Zi Wei chart data
-    context.user_data['assessment']['zi_wei'] = {
-        'ming_gong': EARTHLY_BRANCHES[ming_gong_index],
-        'chart': chart
-    }
-    
-    # Create a personalized query for the AI
-    user_query = (
-        f"Create a personalized Zi Wei Dou Shu reading for {user_name}, born on "
-        f"{birth['year']}-{birth['month']}-{birth['day']} at {birth['hour']:02d}:{birth['minute']:02d}.\n\n"
-        f"Their Zi Wei chart has the following key features:\n"
-        f"- Life Palace (Ming Gong) is in {EARTHLY_BRANCHES[ming_gong_index]}\n"
-        f"- Zi Wei star is in {PALACES[stars['Zi Wei']]} Palace\n"
-        f"- Tian Fu star is in {PALACES[stars['Tian Fu']]} Palace\n"
-        f"- Wu Qu star is in {PALACES[stars['Wu Qu']]} Palace\n\n"
-        f"Provide insights about their life path, personality, talents, and major life events "
-        f"based on this chart. Include analysis of their Life, Wealth, Career, and Relationship palaces."
-    )
-    
     try:
+        # Calculate Zi Wei chart (simplified)
+        ming_gong_index = calculate_ming_gong(birth['year'], birth['month'], birth['day'], birth['hour'])
+        stars = calculate_main_stars(ming_gong_index, birth['year'], birth['month'], birth['day'], birth['hour'])
+        
+        # Create chart representation
+        chart = {}
+        for palace_idx, palace in enumerate(PALACES):
+            chart[palace] = []
+        
+        # Place stars in palaces
+        for star, pos in stars.items():
+            chart[PALACES[pos]].append(star)
+        
+        # Format the chart for display - keep it shorter
+        chart_text = "Life Palace (Ming Gong): " + EARTHLY_BRANCHES[ming_gong_index] + "\n\n"
+        
+        # Limit the number of palaces shown in detail to save space
+        important_palaces = ["Life", "Wealth", "Career", "Spouse"]
+        for palace, palace_stars in chart.items():
+            if palace_stars and palace in important_palaces:
+                chart_text += f"{palace} Palace: {', '.join(palace_stars)}\n"
+        
+        # Show typing indicator
+        await update.message.chat.send_action(action=ChatAction.TYPING)
+        
+        # Store Zi Wei chart data
+        context.user_data['assessment']['zi_wei'] = {
+            'ming_gong': EARTHLY_BRANCHES[ming_gong_index],
+            'chart': chart
+        }
+        
+        # Create a personalized query for the AI - request a SHORTER response
+        user_query = (
+            f"Create a concise personalized Zi Wei Dou Shu reading for {user_name}, born on "
+            f"{birth['year']}-{birth['month']}-{birth['day']} at {birth['hour']:02d}:{birth['minute']:02d}.\n\n"
+            f"Their Zi Wei chart has the following key features:\n"
+            f"- Life Palace (Ming Gong) is in {EARTHLY_BRANCHES[ming_gong_index]}\n"
+            f"- Zi Wei star is in {PALACES[stars['Zi Wei']]} Palace\n"
+            f"- Tian Fu star is in {PALACES[stars['Tian Fu']]} Palace\n\n"
+            f"Provide brief insights about their life path, personality, and main life aspects. "
+            f"Keep the response under 1500 characters total."
+        )
+        
         # Generate AI response
         ai_service = get_ai_service()
         response = await ai_service.generate_response('ziwei', user_query, update.effective_user.id)
         
-        # Add personal touches to the response
-        personalized_response = (
-            f"⭐ *{user_name}'s Zi Wei Dou Shu Chart Reading* ⭐\n\n"
-            f"{chart_text}\n\n"
-            f"*Your Personal Analysis:*\n\n"
-            f"{response}\n\n"
-            f"Would you like more specific information about certain palaces or aspects of your life "
-            f"based on your Zi Wei chart?"
+        # Store the assessment context for follow-up questions
+        context_summary = (
+            f"Zi Wei Dou Shu reading for {user_name}, born on {birth['year']}-{birth['month']}-{birth['day']} "
+            f"at {birth['hour']}:{birth['minute']}. Life Palace in {EARTHLY_BRANCHES[ming_gong_index]}. "
+            f"Zi Wei star in {PALACES[stars['Zi Wei']]} Palace."
         )
+        ai_service.store_assessment_result(update.effective_user.id, 'ziwei', context_summary)
+        
+        # Limit the AI response length
+        if len(response) > 2000:
+            response = response[:1997] + "..."
+        
+        # Add personal touches to the response - keep it shorter
+        personalized_response = (
+            f"⭐ <b>{user_name}'s Zi Wei Dou Shu Chart</b> ⭐\n\n"
+            f"{chart_text}\n"
+            f"<b>Your Analysis:</b>\n\n"
+            f"{response}\n\n"
+            f"Would you like information about other palaces in your chart?"
+        )
+        
+        # Ensure the total message is within Telegram limits
+        if len(personalized_response) > 4000:
+            # Further trim if still too long
+            excess = len(personalized_response) - 3950
+            response = response[:-excess] + "..."
+            personalized_response = (
+                f"⭐ <b>{user_name}'s Zi Wei Dou Shu Chart</b> ⭐\n\n"
+                f"{chart_text}\n"
+                f"<b>Your Analysis:</b>\n\n"
+                f"{response}\n\n"
+                f"Would you like information about other palaces in your chart?"
+            )
         
         # Store this assessment in the database
         db = SessionLocal()
@@ -257,14 +281,14 @@ async def generate_zi_wei_results(update: Update, context: ContextTypes.DEFAULT_
             crud.log_conversation(
                 db, update.effective_user.id, 
                 f"Zi Wei Dou Shu reading", 
-                personalized_response, 
+                personalized_response[:500] + "...",  # Store a truncated version in the database
                 'ziwei'
             )
         finally:
             db.close()
         
         # Send the response
-        await update.message.reply_text(personalized_response, parse_mode="Markdown")
+        await update.message.reply_text(personalized_response, parse_mode="HTML")
         
         return ConversationHandler.END
         

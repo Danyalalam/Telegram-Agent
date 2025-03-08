@@ -149,7 +149,7 @@ async def generate_feng_shui_results(update: Update, context: ContextTypes.DEFAU
         else:
             lucky_directions = "West, Northwest, Southwest, Northeast"
             
-        kua_info = f"Based on your birth date, your Kua number is *{kua_number}*.\n\n"
+        kua_info = f"Based on your birth date, your Kua number is {kua_number}.\n\n"
         
     # Create a personalized query for the AI
     user_query = (
@@ -166,9 +166,17 @@ async def generate_feng_shui_results(update: Update, context: ContextTypes.DEFAU
         ai_service = get_ai_service()
         response = await ai_service.generate_response('feng_shui', user_query, update.effective_user.id)
         
+        # Store the assessment context for follow-up questions
+        context_summary = (
+            f"Feng Shui assessment for {user_name}'s {room}. "
+            f"Kua number: {kua_number if 'birth_info' in assessment else 'Not calculated'}. "
+            f"Lucky directions: {lucky_directions or 'Not calculated'}."
+        )
+        ai_service.store_assessment_result(update.effective_user.id, 'feng_shui', context_summary)
+        
         # Add personal touches to the response
         personalized_response = (
-            f"✨ *{user_name}'s Personalized Feng Shui Analysis* ✨\n\n"
+            f"✨ <b>{user_name}'s Personalized Feng Shui Analysis</b> ✨\n\n"
             f"{kua_info}"
             f"{response}\n\n"
             f"Would you like more specific advice about colors, furniture placement, or another room?"
@@ -188,9 +196,9 @@ async def generate_feng_shui_results(update: Update, context: ContextTypes.DEFAU
         
         # Send the response
         if update.callback_query:
-            await update.callback_query.edit_message_text(personalized_response, parse_mode="Markdown")
+            await update.callback_query.edit_message_text(personalized_response, parse_mode="HTML")
         else:
-            await update.message.reply_text(personalized_response, parse_mode="Markdown")
+            await update.message.reply_text(personalized_response, parse_mode="HTML")
         
         return ConversationHandler.END
         

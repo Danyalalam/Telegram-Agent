@@ -179,9 +179,13 @@ async def generate_mbti_results(update: Update, context: ContextTypes.DEFAULT_TY
         ai_service = get_ai_service()
         response = await ai_service.generate_response('mbti', user_query, update.effective_user.id)
         
+        # Store the assessment context for follow-up questions
+        context_summary = f"MBTI assessment for {user_name} with personality type {mbti_type}."
+        ai_service.store_assessment_result(update.effective_user.id, 'mbti', context_summary)
+        
         # Add personal touches to the response
         personalized_response = (
-            f"🧠 *{user_name}'s MBTI Personality Profile: {mbti_type}* 🧠\n\n"
+            f"🧠 <b>{user_name}'s MBTI Personality Profile: {mbti_type}</b> 🧠\n\n"
             f"{response}\n\n"
             f"Would you like more specific information about your MBTI type's strengths, careers, or relationships?"
         )
@@ -199,7 +203,7 @@ async def generate_mbti_results(update: Update, context: ContextTypes.DEFAULT_TY
             db.close()
         
         # Send the response
-        await update.callback_query.edit_message_text(personalized_response, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(personalized_response, parse_mode="HTML")
         
         return ConversationHandler.END
         

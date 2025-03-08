@@ -49,7 +49,7 @@ async def i_ching_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     await update.message.reply_text(
         response_text,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 async def i_ching_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -168,14 +168,14 @@ async def generate_i_ching_results(update: Update, context: ContextTypes.DEFAULT
     # Show typing indicator
     await update.message.chat.send_action(action=ChatAction.TYPING)
     
-    # Create a personalized query for the AI
+    # Create a personalized query for the AI - request a SHORTER response
     user_query = (
-        f"Create a personalized I-Ching reading for {user_name} who asked: '{question}'. "
+        f"Create a concise personalized I-Ching reading for {user_name} who asked: '{question}'. "
         f"They received hexagram #{primary}"
         f"{f' changing to #{secondary}' if changing_lines else ''}. "
         f"The changing lines are {changing_lines if changing_lines else 'none'}. "
-        f"Provide an interpretation that's personal and relevant to their question. "
-        f"Include both general hexagram meaning and specific advice for their situation."
+        f"Provide a brief but meaningful interpretation relevant to their question. "
+        f"Include the hexagram meaning and specific advice. Keep the response under 1500 characters."
     )
     
     try:
@@ -183,16 +183,48 @@ async def generate_i_ching_results(update: Update, context: ContextTypes.DEFAULT
         ai_service = get_ai_service()
         response = await ai_service.generate_response('iching', user_query, update.effective_user.id)
         
-        # Add personal touches to the response
-        personalized_response = (
-            f"🔮 *{user_name}'s I-Ching Reading* 🔮\n\n"
-            f"*Your Question:* {question}\n\n"
-            f"*Primary Hexagram:* #{primary}\n"
-            f"{f'*Changing to:* #{secondary}' if changing_lines else ''}\n"
-            f"*Changing Lines:* {', '.join(map(str, changing_lines)) if changing_lines else 'None'}\n\n"
-            f"{response}\n\n"
-            f"Would you like to ask another question or learn more about this hexagram?"
+        # Store the assessment context for follow-up questions
+        context_summary = (
+            f"I-Ching reading for {user_name}'s question: '{question}'. "
+            f"Primary hexagram #{primary}"
+            f"{f', changing to #{secondary}' if changing_lines else ''}. "
+            f"Changing lines: {', '.join(map(str, changing_lines)) if changing_lines else 'None'}."
         )
+        ai_service.store_assessment_result(update.effective_user.id, 'iching', context_summary)
+        
+        # Limit the response length
+        if len(response) > 2000:
+            response = response[:1997] + "..."
+        
+        # Truncate question if it's too long
+        if len(question) > 100:
+            question = question[:97] + "..."
+        
+        # Add personal touches to the response - keep it short and concise
+        personalized_response = (
+            f"🔮 <b>{user_name}'s I-Ching Reading</b> 🔮\n\n"
+            f"<b>Question:</b> {question}\n\n"
+            f"<b>Hexagram:</b> #{primary}"
+            f"{f' → #{secondary}' if changing_lines else ''}\n"
+            f"<b>Lines:</b> {', '.join(map(str, changing_lines)) if changing_lines else 'None'}\n\n"
+            f"{response}\n\n"
+            f"Would you like more details about this reading?"
+        )
+        
+        # Ensure the total message is within Telegram limits
+        if len(personalized_response) > 4000:
+            # Further trim if still too long
+            excess = len(personalized_response) - 3950
+            response = response[:-excess] + "..."
+            personalized_response = (
+                f"🔮 <b>{user_name}'s I-Ching Reading</b> 🔮\n\n"
+                f"<b>Question:</b> {question}\n\n"
+                f"<b>Hexagram:</b> #{primary}"
+                f"{f' → #{secondary}' if changing_lines else ''}\n"
+                f"<b>Lines:</b> {', '.join(map(str, changing_lines)) if changing_lines else 'None'}\n\n"
+                f"{response}\n\n"
+                f"Would you like more details about this reading?"
+            )
         
         # Store this assessment in the database
         db = SessionLocal()
@@ -200,14 +232,14 @@ async def generate_i_ching_results(update: Update, context: ContextTypes.DEFAULT
             crud.log_conversation(
                 db, update.effective_user.id, 
                 f"I-Ching reading: Hexagram {primary}", 
-                personalized_response, 
+                personalized_response[:500] + "...",  # Store truncated version in database 
                 'iching'
             )
         finally:
             db.close()
         
         # Send the response
-        await update.message.reply_text(personalized_response, parse_mode="Markdown")
+        await update.message.reply_text(personalized_response, parse_mode="HTML")
         
         return ConversationHandler.END
         

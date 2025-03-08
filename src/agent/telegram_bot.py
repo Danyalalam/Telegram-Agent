@@ -187,7 +187,7 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.chat.send_action(action=ChatAction.TYPING)
     
     try:
-        # Generate AI response
+        # Generate AI response with user_id to maintain chat history
         response = await ai_service.generate_response(topic, user_message, update.effective_user.id)
         
         # Store the conversation in the database
