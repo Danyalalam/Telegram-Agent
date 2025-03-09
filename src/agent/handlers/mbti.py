@@ -49,7 +49,7 @@ async def mbti_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     await update.message.reply_text(
         response_text,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 async def mbti_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -167,11 +167,11 @@ async def generate_mbti_results(update: Update, context: ContextTypes.DEFAULT_TY
     user_name = assessment['name']
     mbti_type = assessment['mbti_type']
     
-    # Create a personalized query for the AI
+    # Create a personalized query for the AI - specify maximum length
     user_query = (
-        f"Create a personalized MBTI analysis for {user_name} who has the type {mbti_type}. "
-        f"Include strengths, weaknesses, career recommendations, and relationship compatibility. "
-        f"Make it feel personal and specific to them. Keep it concise but detailed."
+        f"Create a concise personalized MBTI analysis for {user_name} who has the type {mbti_type}. "
+        f"Include key strengths, weaknesses, career recommendations, and relationship compatibility. "
+        f"Make it feel personal but keep the total response under 1000 characters."
     )
     
     try:
@@ -183,12 +183,27 @@ async def generate_mbti_results(update: Update, context: ContextTypes.DEFAULT_TY
         context_summary = f"MBTI assessment for {user_name} with personality type {mbti_type}."
         ai_service.store_assessment_result(update.effective_user.id, 'mbti', context_summary)
         
-        # Add personal touches to the response
+        # Limit the response length
+        if len(response) > 1500:
+            response = response[:1497] + "..."
+        
+        # Add personal touches to the response - keep it concise
         personalized_response = (
             f"🧠 <b>{user_name}'s MBTI Personality Profile: {mbti_type}</b> 🧠\n\n"
             f"{response}\n\n"
             f"Would you like more specific information about your MBTI type's strengths, careers, or relationships?"
         )
+        
+        # Ensure the total message is within Telegram limits
+        if len(personalized_response) > 4000:
+            # Further trim if still too long
+            excess = len(personalized_response) - 3950
+            response = response[:-excess] + "..."
+            personalized_response = (
+                f"🧠 <b>{user_name}'s MBTI Personality Profile: {mbti_type}</b> 🧠\n\n"
+                f"{response}\n\n"
+                f"Would you like more specific information about your MBTI type's strengths, careers, or relationships?"
+            )
         
         # Store this assessment in the database
         db = SessionLocal()
@@ -196,7 +211,7 @@ async def generate_mbti_results(update: Update, context: ContextTypes.DEFAULT_TY
             crud.log_conversation(
                 db, update.effective_user.id, 
                 f"MBTI assessment result: {mbti_type}", 
-                personalized_response, 
+                personalized_response[:500] + "...",  # Store a truncated version in the database
                 'mbti'
             )
         finally:

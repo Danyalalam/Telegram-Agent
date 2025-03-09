@@ -17,6 +17,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_interaction = Column(DateTime, default=datetime.datetime.utcnow)
     subscribed_to_tips = Column(Boolean, default=False)
+    language = Column(String(5), default="en")  
     
 class Conversation(Base):
     __tablename__ = "conversations"

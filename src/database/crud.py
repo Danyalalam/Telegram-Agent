@@ -99,3 +99,12 @@ def update_user_subscription(db: Session, telegram_id: int, subscribed: bool) ->
 def get_subscribed_users(db: Session) -> List[models.User]:
     """Get all users who are subscribed to daily tips."""
     return db.query(models.User).filter(models.User.subscribed_to_tips == True).all()
+
+def update_user_language(db: Session, telegram_id: int, language: str):
+    """Update user's preferred language."""
+    user = get_user(db, telegram_id=telegram_id)
+    if user:
+        user.language = language
+        db.commit()
+        db.refresh(user)
+    return user

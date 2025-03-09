@@ -50,7 +50,7 @@ async def ba_zi_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     
     await update.message.reply_text(
         response_text,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 async def ba_zi_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -122,7 +122,16 @@ def get_month_pillar(year, month):
     """Calculate month pillar based on Chinese calendar (simplified)."""
     # Simplified calculation - actual would depend on solar terms
     stem_index = ((year - 4) * 12 + month) % 10
-    branch_index = (month + 2) % 12 if month > 2 else (month + 10)
+    
+    # The problem is in this line - the calculation can produce values > 11
+    # branch_index = (month + 2) % 12 if month > 2 else (month + 10)
+    
+    # Fixed calculation to ensure branch_index is between 0-11
+    if month > 2:
+        branch_index = (month + 2) % 12
+    else:
+        branch_index = (month + 10) % 12
+    
     return {
         'stem': HEAVENLY_STEMS[stem_index],
         'branch': EARTHLY_BRANCHES[branch_index],
@@ -167,14 +176,11 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
         'day_master': day_master
     }
     
-    # Format the chart for display
+    # Format the chart for display - more compact format
     chart = (
-        f"Year Pillar: {year_pillar['stem']} ({year_pillar['stem_element']}) {year_pillar['branch']} "
-        f"({year_pillar['branch_element']}) - {year_pillar['animal']}\n"
-        f"Month Pillar: {month_pillar['stem']} ({month_pillar['stem_element']}) {month_pillar['branch']} "
-        f"({month_pillar['branch_element']})\n"
-        f"Day Pillar: {day_pillar['stem']} ({day_pillar['stem_element']}) {day_pillar['branch']} "
-        f"({day_pillar['branch_element']})\n"
+        f"Year: {year_pillar['stem']} ({year_pillar['stem_element']}) {year_pillar['branch']} ({year_pillar['branch_element']}) - {year_pillar['animal']}\n"
+        f"Month: {month_pillar['stem']} ({month_pillar['stem_element']}) {month_pillar['branch']} ({month_pillar['branch_element']})\n"
+        f"Day: {day_pillar['stem']} ({day_pillar['stem_element']}) {day_pillar['branch']} ({day_pillar['branch_element']})\n"
         f"Day Master: {day_master}"
     )
     
@@ -195,16 +201,16 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
     # Show typing indicator
     await update.message.chat.send_action(action=ChatAction.TYPING)
     
-    # Create a personalized query for the AI
+    # Create a personalized query for the AI - request a SHORTER response
     user_query = (
-        f"Create a personalized Ba Zi (Four Pillars) reading for {user_name}, born on "
+        f"Create a concise personalized Ba Zi (Four Pillars) reading for {user_name}, born on "
         f"{birth['year']}-{birth['month']}-{birth['day']}.\n\n"
         f"Their Ba Zi chart is:\n{chart}\n\n"
         f"Day Master: {day_master}\n"
         f"Element counts: Wood ({elements['Wood']}), Fire ({elements['Fire']}), "
         f"Earth ({elements['Earth']}), Metal ({elements['Metal']}), Water ({elements['Water']})\n\n"
-        f"Provide insights about their personality, strengths, challenges, and general life path "
-        f"based on this chart. Include information about favorable and unfavorable elements."
+        f"Provide brief insights about their personality, strengths, challenges, and favorable elements. "
+        f"Keep your response under 1000 characters total."
     )
     
     try:
@@ -220,18 +226,35 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
         )
         ai_service.store_assessment_result(update.effective_user.id, 'bazi', context_summary)
         
-        # Add personal touches to the response
+        # Limit response length
+        if len(response) > 2000:
+            response = response[:1997] + "..."
+        
+        # Add personal touches to the response - more compact format
         personalized_response = (
-            f"🌙 <b>{user_name}'s Ba Zi (Four Pillars) Chart</b> 🌙\n\n"
-            f"{chart}\n\n"
-            f"<b>Element Balance:</b>\n"
-            f"Wood: {elements['Wood']}, Fire: {elements['Fire']}, Earth: {elements['Earth']}, "
+            f"🌙 <b>{user_name}'s Ba Zi Chart</b> 🌙\n\n"
+            f"<b>Chart:</b>\n{chart}\n\n"
+            f"<b>Elements:</b> Wood: {elements['Wood']}, Fire: {elements['Fire']}, Earth: {elements['Earth']}, "
             f"Metal: {elements['Metal']}, Water: {elements['Water']}\n\n"
-            f"<b>Your Personal Reading:</b>\n\n"
+            f"<b>Your Reading:</b>\n\n"
             f"{response}\n\n"
-            f"Would you like more specific information about your favorable directions, "
-            f"colors, or career paths based on your Ba Zi chart?"
+            f"Would you like more information about your favorable elements or specific life aspects?"
         )
+        
+        # Ensure the total message is within Telegram limits
+        if len(personalized_response) > 4000:
+            # Further trim if still too long
+            excess = len(personalized_response) - 3950
+            response = response[:-excess] + "..."
+            personalized_response = (
+                f"🌙 <b>{user_name}'s Ba Zi Chart</b> 🌙\n\n"
+                f"<b>Chart:</b>\n{chart}\n\n"
+                f"<b>Elements:</b> Wood: {elements['Wood']}, Fire: {elements['Fire']}, Earth: {elements['Earth']}, "
+                f"Metal: {elements['Metal']}, Water: {elements['Water']}\n\n"
+                f"<b>Your Reading:</b>\n\n"
+                f"{response}\n\n"
+                f"Would you like more information about your favorable elements or specific life aspects?"
+            )
         
         # Store this assessment in the database
         db = SessionLocal()
@@ -239,7 +262,7 @@ async def generate_ba_zi_results(update: Update, context: ContextTypes.DEFAULT_T
             crud.log_conversation(
                 db, update.effective_user.id, 
                 f"Ba Zi reading: Day Master {day_master}", 
-                personalized_response, 
+                personalized_response[:500] + "...",  # Store a truncated version in the database
                 'bazi'
             )
         finally:
