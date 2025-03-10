@@ -36,10 +36,20 @@ def get_db():
         yield db
     finally:
         db.close()
+        
+@app.get("/health")
+async def health():
+    """Health check endpoint for monitoring services like Render."""
+    return {"status": "ok", "service": "Chinese Metaphysics Telegram Bot"}
 
 @app.get("/")
 async def root():
-    return {"message": "Feng Shui Bot API is running"}
+    return {
+        "name": "Chinese Metaphysics Telegram Bot API",
+        "version": "1.0.0",
+        "status": "running",
+        "documentation": "/docs"
+    }
 
 @app.get("/users/", response_model=List[UserBase])
 async def get_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):

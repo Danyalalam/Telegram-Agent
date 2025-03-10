@@ -6,6 +6,7 @@ from src.database.models import init_db
 from src.services.scheduler import TipsScheduler
 import threading
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -40,9 +41,12 @@ async def run_bot():
         logger.info("Shutting down bot...")
         await application.stop()
 
+# Update this function to use the PORT environment variable
 def run_api():
     """Run the FastAPI server."""
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting API server on port {port}")
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=port)
 
 async def main():
     """Run both the bot and API server."""

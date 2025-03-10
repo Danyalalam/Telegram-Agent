@@ -108,3 +108,10 @@ def update_user_language(db: Session, telegram_id: int, language: str):
         db.commit()
         db.refresh(user)
     return user
+
+def get_user_language(db: Session, telegram_id: int) -> str:
+    """Get user's preferred language, defaulting to English."""
+    user = get_user(db, telegram_id=telegram_id)
+    if user and hasattr(user, 'language') and user.language:
+        return user.language
+    return "en"
