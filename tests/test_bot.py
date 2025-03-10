@@ -14,7 +14,7 @@ logger = logging.getLogger("GPT4o-Test")
 
 # Load the OpenAI API key from environment variables or set it directly
 # For testing, we'll set it directly, but in production use environment variables
-API_KEY = "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"  # Replace with your actual API key
+API_KEY = "your_openai_api_key"  # Replace with your actual API key
 
 class GPT4oTester:
     def __init__(self, api_key=None):
