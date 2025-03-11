@@ -4,6 +4,7 @@ from src.agent.telegram_bot import create_application, ai_service
 from src.api.routes import app as fastapi_app
 from src.database.models import init_db
 from src.services.scheduler import TipsScheduler
+from src.services.keep_alive import KeepAliveService
 import threading
 import logging
 import os
@@ -53,6 +54,11 @@ async def main():
     # Initialize the database
     logger.info("Initializing database...")
     init_db()
+    
+    # Start the keep-alive service
+    logger.info("Starting keep-alive service...")
+    keep_alive = KeepAliveService(interval_minutes=10)  # Ping every 10 minutes
+    keep_alive.start()
     
     # Start the API server in a separate thread
     logger.info("Starting API server...")
