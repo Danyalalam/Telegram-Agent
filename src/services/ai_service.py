@@ -1,45 +1,39 @@
-import google.generativeai as genai
 import logging
-from ..config import GEMINI_API_KEY
+import time
+import os
+from openai import AsyncOpenAI
+from ..config import OPENAI_API_KEY
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Configure the Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
-
 class AIService:
     def __init__(self):
-        # Define generation config for more context retention
-        generation_config = {
-            "temperature": 0.7,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 2048  # Increased output length for more detailed responses
-        }
+        # Initialize the OpenAI client
+        if not OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY environment variable not set")
+            
+        self.client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        self.model_name = "gpt-4o"
+        logger.info(f"Initialized OpenAI client with model: {self.model_name}")
         
-        # Safety settings - keep the safe defaults
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
-        ]
+        # Define generation parameters
+        self.temperature = 0.7
+        self.max_tokens = 2048  # Maximum output length for detailed responses
         
-        # Configure model with custom settings for better responses
-        self.model = genai.GenerativeModel(
-            'gemini-1.5-pro',
-            generation_config=generation_config,
-            safety_settings=safety_settings
-        )
+        # Track usage for monitoring
+        self.total_tokens_used = 0
+        self.api_calls_count = 0
+        self.api_start_time = time.time()
         
-        self.chat_sessions = {}  # Store chat sessions by user_id
+        # Session storage
+        self.chat_sessions = {}  # Store message history by user_id
         self.user_topics = {}    # Track the current topic for each user
         self.assessment_results = {}  # Store assessment results for follow-up questions
         self.user_languages = {}  # Track user language preferences
 
     async def generate_response(self, topic: str, query: str, user_id=None, language="en") -> str:
-        """Generate a response using Gemini based on the topic and query."""
+        """Generate a response using GPT-4o based on the topic and query."""
         
         # Update user language preference if provided
         if user_id:
@@ -79,39 +73,64 @@ class AIService:
                     f"previous assessment. Respond in {'Chinese' if language == 'zh' else 'English'}."
                 )
         
-        # Create the prompt based on whether this is a follow-up
-        if is_followup:
-            prompt = self._create_followup_prompt(topic, query, context_info, language)
-        else:
-            prompt = self._create_prompt(topic, query, language)
-        
         try:
-            # If user_id is provided, maintain a chat session
-            if user_id:
-                # Check if topic or language has changed for this user
-                if (user_id in self.user_topics and 
-                    (self.user_topics[user_id] != topic or 
-                     self.user_languages.get(user_id) != language) and 
-                    not is_followup):
-                    # Topic or language changed, create a new chat session
-                    self.chat_sessions[user_id] = self.model.start_chat(history=[])
-                
-                # Update current topic and language
-                self.user_topics[user_id] = topic
-                self.user_languages[user_id] = language
-                
-                # Create new chat session if needed
-                if user_id not in self.chat_sessions:
-                    self.chat_sessions[user_id] = self.model.start_chat(history=[])
-                
-                # Use the existing chat session
-                chat = self.chat_sessions[user_id]
-                response = await chat.send_message_async(prompt)
+            # Get current session if applicable
+            session = self.chat_sessions.get(user_id, []) if user_id else []
+            
+            # Create a system message based on topic and language
+            system_prompt = self._create_system_prompt(topic, language)
+            
+            # Prepare messages for the API call
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            # Add conversation history (up to last 10 messages)
+            if user_id and session:
+                messages.extend(session[-10:])  # Only include the last 10 messages to avoid token limits
+            
+            # Add the user's query
+            if is_followup:
+                messages.append({"role": "user", "content": self._create_followup_prompt(query, context_info, language)})
             else:
-                # One-off generation
-                response = await self.model.generate_content_async(prompt)
+                messages.append({"role": "user", "content": query})
+            
+            # Log the request for debugging
+            logger.info(f"Sending request to OpenAI API for user {user_id if user_id else 'anonymous'} on topic {topic}")
+            
+            # Increment API call counter
+            self.api_calls_count += 1
+            
+            # Make the API call
+            response = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            # Track token usage
+            if hasattr(response, 'usage') and response.usage:
+                self.total_tokens_used += response.usage.total_tokens
+                logger.info(f"Request used {response.usage.total_tokens} tokens")
+            
+            # Extract the response text
+            result = response.choices[0].message.content
+            
+            # Store the message history for this user if needed
+            if user_id:
+                # Check if we need to initialize the chat sessions for this user
+                if user_id not in self.chat_sessions:
+                    self.chat_sessions[user_id] = []
                 
-            return self._format_response(response.text)
+                # Store the exchange
+                self.chat_sessions[user_id].append({"role": "user", "content": query})
+                self.chat_sessions[user_id].append({"role": "assistant", "content": result})
+                
+                # Keep only the last 20 messages in history to manage token usage
+                if len(self.chat_sessions[user_id]) > 20:
+                    self.chat_sessions[user_id] = self.chat_sessions[user_id][-20:]
+            
+            return self._format_response(result)
+            
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             if language == 'zh':
@@ -126,75 +145,86 @@ class AIService:
             'context': context
         }
 
-    def _create_prompt(self, topic: str, query: str, language="en") -> str:
-        """Create a prompt based on the topic and language."""
+    def _create_system_prompt(self, topic: str, language="en") -> str:
+        """Create a system prompt based on the topic and language."""
         
-        # English prompts
+        # English system prompts
         en_prompts = {
             "feng_shui": (
-                f"You are a Feng Shui expert. Provide helpful, accurate advice about Feng Shui "
-                f"in response to this query. Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+                "You are a Feng Shui expert with decades of experience. Provide helpful, accurate advice about "
+                "Feng Shui principles, home and office arrangement, energy flow, and related concepts. "
+                "Use terminology appropriate for both beginners and advanced practitioners. "
+                "Be practical, concise, and respectful of this ancient Chinese practice. "
+                "Respond in English using clear, well-structured explanations."
             ),
             "mbti": (
-                f"You are an MBTI personality type expert. Provide helpful, accurate information "
-                f"about MBTI personality types in response to this query. "
-                f"Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+                "You are an MBTI personality type expert with deep knowledge of cognitive functions, type dynamics, "
+                "and practical applications of personality theory. Provide accurate, nuanced information about MBTI types, "
+                "their characteristics, relationships, career fits, and growth paths. "
+                "Avoid stereotyping and acknowledge individual variation within types. "
+                "Respond in English with balanced, thoughtful explanations."
             ),
-            "iching": (
-                f"You are an I-Ching oracle expert. Provide helpful, accurate interpretation of "
-                f"hexagrams and I-Ching wisdom in response to this query. "
-                f"Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+            "i_ching": (
+                "You are an I-Ching divination master with profound understanding of the Book of Changes. "
+                "Provide insightful interpretations of hexagrams, their changing lines, and applications to "
+                "the questioner's situation. Honor the philosophical depth of this ancient oracle system. "
+                "Be respectful, wise, and avoid overly deterministic predictions. "
+                "Respond in English with clear explanations that balance traditional wisdom with practical guidance."
             ),
-            "bazi": (
-                f"You are a Ba Zi (Four Pillars) expert. Provide helpful, accurate Chinese birth chart "
-                f"analysis and interpretations in response to this query. "
-                f"Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+            "ba_zi": (
+                "You are a BaZi (Four Pillars) expert skilled in Chinese destiny analysis. "
+                "Provide thoughtful interpretations of birth charts, element interactions, luck cycles, "
+                "and personal characteristics based on this traditional system. "
+                "Balance deterministic aspects with wisdom about personal agency. "
+                "Respond in English with clear, structured explanations and practical insights."
             ),
-            "ziwei": (
-                f"You are a Zi Wei Dou Shu (Purple Star Astrology) expert. Provide helpful, accurate "
-                f"interpretations of star positions and palace influences in response to this query. "
-                f"Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+            "zi_wei": (
+                "You are a Zi Wei Dou Shu (Purple Star Astrology) master with deep expertise in this complex "
+                "Chinese astrological system. Provide insightful interpretations of charts, star positions, "
+                "palace influences, and life predictions. Explain concepts clearly for those unfamiliar with the system. "
+                "Balance destiny interpretations with practical guidance. "
+                "Respond in English with well-organized explanations and thoughtful analysis."
             ),
             "general": (
-                f"You are an AI assistant specializing in Chinese metaphysics (Feng Shui, I-Ching, Ba Zi, "
-                f"Zi Wei Dou Shu) and MBTI personality types. If this query relates to one of these topics, "
-                f"provide relevant information. If not, politely explain that you focus on these domains. "
-                f"Keep your response concise but thorough. "
-                f"Respond in English. Query: {query}"
+                "You are an expert in Chinese metaphysical systems (Feng Shui, I-Ching, BaZi, Zi Wei Dou Shu) "
+                "and personality psychology including MBTI. Provide helpful, accurate information while respecting "
+                "these traditions' cultural and philosophical foundations. If asked about other topics, gently "
+                "guide the conversation back to your areas of expertise. "
+                "Respond in English with clear, concise, well-structured explanations."
             )
         }
         
-        # Chinese prompts
+        # Chinese system prompts
         zh_prompts = {
             "feng_shui": (
-                f"你是一位风水专家。请对这个问题提供有帮助、准确的风水建议。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+                "你是一位拥有数十年经验的风水专家。提供关于风水原理、家居和办公室布置、能量流动及相关概念的有帮助且准确的建议。"
+                "使用适合初学者和高级实践者的术语。务实、简洁，并尊重这一古老的中国实践。"
+                "用清晰、结构良好的中文解释回答问题。"
             ),
             "mbti": (
-                f"你是一位MBTI人格类型专家。请针对这个问题提供有关MBTI人格类型的有帮助、准确的信息。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+                "你是一位对认知功能、类型动态和人格理论实际应用有深入了解的MBTI人格类型专家。"
+                "提供关于MBTI类型、其特征、关系、职业匹配和成长路径的准确、细致的信息。"
+                "避免刻板印象，承认类型内个体差异。用平衡、深思熟虑的中文解释回答问题。"
             ),
-            "iching": (
-                f"你是一位易经专家。请提供有关卦象和易经智慧的有帮助、准确的解释，回应这个问题。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+            "i_ching": (
+                "你是一位对《易经》有深刻理解的易经占卜大师。提供关于卦象、变爻及其对提问者情况的应用的有见地的解释。"
+                "尊重这一古老预言系统的哲学深度。保持尊重、智慧，避免过于决定论的预测。"
+                "用清晰的中文解释回答，平衡传统智慧与实用指导。"
             ),
-            "bazi": (
-                f"你是一位八字（四柱）专家。请提供有关中国生辰八字分析和解释的有帮助、准确的信息，回应这个问题。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+            "ba_zi": (
+                "你是一位精通中国命运分析的八字（四柱）专家。基于这一传统系统，提供关于生辰八字、五行相互作用、运气周期和个人特征的深思熟虑的解释。"
+                "平衡决定论方面与关于个人能动性的智慧。用清晰、结构良好的中文解释和实用见解回答问题。"
             ),
-            "ziwei": (
-                f"你是一位紫微斗数（紫星占星）专家。请针对这个问题提供有关星位和宫位影响的有帮助、准确的解释。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+            "zi_wei": (
+                "你是一位对这一复杂的中国占星系统有深入专业知识的紫微斗数大师。提供关于命盘、星位、宫位影响和人生预测的有见地的解释。"
+                "为不熟悉该系统的人清晰地解释概念。平衡命运解释与实用指导。"
+                "用组织良好的中文解释和深思熟虑的分析回答问题。"
             ),
             "general": (
-                f"你是一位专注于中国玄学（风水、易经、八字、紫微斗数）和MBTI人格类型的AI助手。"
-                f"如果这个问题与这些主题相关，请提供相关信息。如果不相关，请礼貌地解释你专注于这些领域。"
-                f"请保持简洁但详细的回答。请用中文回答。问题：{query}"
+                "你是中国玄学系统（风水、易经、八字、紫微斗数）和包括MBTI在内的人格心理学专家。"
+                "提供有帮助、准确的信息，同时尊重这些传统的文化和哲学基础。"
+                "如果被问及其他主题，请温和地将对话引导回你的专业领域。"
+                "用清晰、简洁、结构良好的中文解释回答问题。"
             )
         }
         
@@ -203,20 +233,19 @@ class AIService:
         
         return prompts.get(topic, prompts["general"])
     
-    def _create_followup_prompt(self, topic: str, query: str, context_info: str, language="en") -> str:
+    def _create_followup_prompt(self, query: str, context_info: str, language="en") -> str:
         """Create a prompt for follow-up questions with context."""
         if language == 'zh':
-            base = (
-                f"用户正在询问一个后续问题。{context_info} "
-                f"基于这个上下文，提供一个详细的回答，直接解答他们的后续问题。请用中文回答。问题：{query}"
+            return (
+                f"{context_info} "
+                f"基于这个上下文，提供一个详细的回答，直接解答用户的后续问题：{query}"
             )
         else:
-            base = (
-                f"The user is asking a follow-up question. {context_info} "
+            return (
+                f"{context_info} "
                 f"Based on this context, provide a detailed response that directly addresses "
-                f"their follow-up question. Respond in English. Query: {query}"
+                f"the user's follow-up question: {query}"
             )
-        return base
     
     def _format_response(self, text: str) -> str:
         """Format the response text to be suitable for Telegram."""
@@ -236,6 +265,7 @@ class AIService:
     def reset_chat_session(self, user_id):
         """Reset a user's chat session."""
         if user_id in self.chat_sessions:
-            self.chat_sessions[user_id] = self.model.start_chat(history=[])
+            self.chat_sessions[user_id] = []
+            logger.info(f"Reset chat session for user {user_id}")
             return True
         return False
