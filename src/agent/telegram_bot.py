@@ -779,24 +779,64 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle language selection callback."""
-    query = update.callback_query
-    user_id = update.effective_user.id
-    
-    await query.answer()
-    
-    # Get selected language
-    language = query.data.split('_')[1]  # lang_en or lang_zh
-    
-    # Store language preference in database
-    db = SessionLocal()
     try:
-        crud.update_user_language(db, telegram_id=user_id, language=language)
+        # Get the callback query
+        query = update.callback_query
+        user_id = update.effective_user.id
+        
+        # Log all information for debugging
+        logger.info(f"Received language callback from user {user_id}")
+        logger.info(f"Callback data: {query.data}")
+        
+        # Answer the callback query to stop the loading animation EARLY
+        # This should immediately remove the "loading" indicator
+        await query.answer()
+        logger.info("Callback query answered")
+        
+        # Get selected language
+        language = query.data.split('_')[1]  # lang_en or lang_zh
+        logger.info(f"Selected language: {language}")
+        
+        # Set a temporary message to show progress
+        try:
+            await query.edit_message_text(
+                text="Updating language preference..." if language == 'en' else "正在更新语言首选项...",
+                parse_mode="HTML"
+            )
+            logger.info("Updated to temporary message")
+        except Exception as edit_err:
+            logger.error(f"Failed to edit message with temporary text: {edit_err}")
+        
+        # Store language preference in database
+        db = None
+        try:
+            db = SessionLocal()
+            logger.info("Database session created")
+            
+            # Update language in database
+            crud.update_user_language(db, telegram_id=user_id, language=language)
+            logger.info(f"Language updated in database for user {user_id}")
+            
+            # Close DB connection manually to ensure it doesn't block
+            db.close()
+            db = None
+            logger.info("Database connection closed")
+            
+        except Exception as db_err:
+            logger.error(f"Database error: {db_err}", exc_info=True)
+            if db:
+                db.close()
         
         # Store in context for immediate use
         context.user_data['language'] = language
+        logger.info("Language set in context.user_data")
         
         # Also update the AI service's memory of user language
-        ai_service.set_user_language(user_id, language)
+        try:
+            ai_service.set_user_language(user_id, language)
+            logger.info("Language set in AI service")
+        except Exception as ai_err:
+            logger.error(f"Error updating AI service language: {ai_err}")
         
         # Confirmation message based on language
         if language == 'en':
@@ -809,21 +849,96 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 "✅ 您的语言已设置为中文。\n\n"
                 "您现在将收到中文回复。"
             )
-            
-        # Send confirmation
-        await query.edit_message_text(
-            text=message,
-            parse_mode="HTML"
-        )
+        
+        # Send confirmation - wrap in try/except to catch any errors
+        try:
+            logger.info("Attempting to send final confirmation message")
+            await query.edit_message_text(
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("Final confirmation message sent successfully")
+        except Exception as edit_err:
+            logger.error(f"Failed to edit message with confirmation: {edit_err}", exc_info=True)
+            # Try to send a new message if editing fails
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id, 
+                    text=message + "\n\n(Could not update previous message)",
+                    parse_mode="HTML"
+                )
+                logger.info("Sent confirmation as new message instead")
+            except Exception as send_err:
+                logger.error(f"Failed to send new message: {send_err}")
         
     except Exception as e:
-        logger.error(f"Error setting language preference: {e}")
-        await query.edit_message_text(
-            "⚠️ There was an error setting your language preference. "
-            "Please try again later."
+        logger.error(f"Error in language_callback: {e}", exc_info=True)
+        # Try to notify the user about the error
+        try:
+            if update.callback_query:
+                await update.callback_query.answer("An error occurred")
+                await update.callback_query.edit_message_text(
+                    "⚠️ There was an error setting your language preference. "
+                    "Please try again later."
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="⚠️ There was an error setting your language preference. "
+                        "Please try again later."
+                )
+        except Exception:
+            # At this point we can't do much more
+            pass
+        
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reset the bot state for this user."""
+    user_id = update.effective_user.id
+    
+    logger.info(f"User {user_id} requested a restart")
+    
+    # Get user language preference
+    language = context.user_data.get('language', 'en')
+    
+    # Reset user data in context
+    context.user_data.clear()
+    # Restore language setting so we can still communicate properly
+    context.user_data['language'] = language
+    
+    # Reset the AI session for this user
+    try:
+        if hasattr(ai_service, 'reset_chat_session'):
+            ai_service.reset_chat_session(user_id)
+            logger.info(f"AI chat session reset for user {user_id}")
+        
+        if hasattr(ai_service, 'chat_sessions') and user_id in ai_service.chat_sessions:
+            del ai_service.chat_sessions[user_id]
+            logger.info(f"AI chat session deleted for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error resetting AI session: {e}")
+    
+    # Reset any active conversation
+    if 'conversation_key' in context.chat_data:
+        del context.chat_data['conversation_key']
+        logger.info(f"Deleted conversation_key for user {user_id}")
+    
+    # Send confirmation
+    if language == 'zh':
+        message = (
+            "🔄 机器人已重启！所有之前的对话已被重置。\n\n"
+            "使用 /start 重新开始，或使用 /help 查看可用命令。"
         )
-    finally:
-        db.close()
+    else:
+        message = (
+            "🔄 Bot has been restarted! All previous conversations have been reset.\n\n"
+            "Use /start to begin again or /help to see available commands."
+        )
+        
+    await update.message.reply_text(message)
+    logger.info(f"Sent restart confirmation to user {user_id}")
+    
+    # Return ConversationHandler.END to exit any active conversation
+    return ConversationHandler.END
 
 
 def create_application():
@@ -889,6 +1004,9 @@ def create_application():
     application.add_handler(CommandHandler("bazi", ba_zi.ba_zi_command))
     application.add_handler(CommandHandler("ziwei", zi_wei.zi_wei_command))
     application.add_handler(CommandHandler("topic", topic_command))
+    
+    # Add restart command
+    application.add_handler(CommandHandler("restart", restart_command))
     
 
 
