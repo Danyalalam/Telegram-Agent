@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 # Create AI service instance
 ai_service = AIService()
 
+
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Debug command to test basic bot functionality."""
+    logger.info(f"DEBUG COMMAND: Received from user {update.effective_user.id}")
+    await update.message.reply_text("Debug command received! Bot is responding correctly.")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
@@ -601,59 +607,106 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def start_assessment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start a personalized assessment."""
-    # Get user language preference
-    language = context.user_data.get('language', None)
+    user_id = update.effective_user.id
+    logger.info(f"ASSESS COMMAND: Started for user {user_id}")
     
-    if not language:
-        db = SessionLocal()
+    try:
+        # Get user language preference
+        language = context.user_data.get('language', None)
+        logger.info(f"ASSESS COMMAND: Initial language from context: {language}")
+        
+        if not language:
+            db = SessionLocal()
+            try:
+                logger.info("ASSESS COMMAND: Fetching language from database")
+                db_user = crud.get_user(db, telegram_id=user_id)
+                if db_user and hasattr(db_user, 'language'):
+                    language = db_user.language
+                    # Cache it in context
+                    context.user_data['language'] = language
+                    logger.info(f"ASSESS COMMAND: Found language in DB: {language}")
+                else:
+                    language = 'en'  # Default to English
+                    logger.info("ASSESS COMMAND: No language in DB, defaulting to English")
+            except Exception as e:
+                logger.error(f"ASSESS COMMAND: Database error: {e}")
+                language = 'en'  # Default on error
+            finally:
+                db.close()
+                logger.info("ASSESS COMMAND: Database connection closed")
+        
+        logger.info(f"ASSESS COMMAND: Using language: {language}")
+            
+        # Create buttons based on language
+        if language == 'zh':
+            logger.info("ASSESS COMMAND: Creating Chinese language buttons")
+            keyboard = [
+                [
+                    InlineKeyboardButton("🏠 风水", callback_data='feng_shui'),
+                    InlineKeyboardButton("🧠 MBTI人格", callback_data='mbti'),
+                ],
+                [
+                    InlineKeyboardButton("🔮 易经", callback_data='i_ching'),
+                    InlineKeyboardButton("🌙 八字", callback_data='ba_zi'),
+                ],
+                [
+                    InlineKeyboardButton("⭐ 紫微斗数", callback_data='zi_wei'),
+                ]
+            ]
+            message_text = (
+                "您好！我是您的个人中国玄学和人格分析顾问。"
+                "我想更好地了解您，以提供个性化的见解。\n\n"
+                "今天您想让我帮您什么？"
+            )
+        else:
+            logger.info("ASSESS COMMAND: Creating English language buttons")
+            keyboard = [
+                [
+                    InlineKeyboardButton("🏠 Feng Shui", callback_data='feng_shui'),
+                    InlineKeyboardButton("🧠 MBTI", callback_data='mbti'),
+                ],
+                [
+                    InlineKeyboardButton("🔮 I-Ching", callback_data='i_ching'),
+                    InlineKeyboardButton("🌙 Ba Zi", callback_data='ba_zi'),
+                ],
+                [
+                    InlineKeyboardButton("⭐ Zi Wei Dou Shu", callback_data='zi_wei'),
+                ]
+            ]
+            message_text = (
+                "Hi! I'm your personal consultant for Chinese metaphysics and personality analysis. "
+                "I'd like to get to know you better to provide personalized insights.\n\n"
+                "What would you like me to help you with today?"
+            )
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        logger.info("ASSESS COMMAND: Created keyboard markup")
+        
+        # Send the message with buttons
+        message = await update.message.reply_text(
+            text=message_text,
+            reply_markup=reply_markup
+        )
+        logger.info(f"ASSESS COMMAND: Sent message {message.message_id}")
+        
+        # Initialize the assessment data structure
+        context.user_data['assessment'] = {
+            'language': language
+        }
+        logger.info("ASSESS COMMAND: Assessment context initialized")
+        
+        return SELECTING_TOPIC
+    
+    except Exception as e:
+        logger.error(f"ASSESS COMMAND ERROR: {e}", exc_info=True)
         try:
-            db_user = crud.get_user(db, telegram_id=update.effective_user.id)
-            if db_user and hasattr(db_user, 'language'):
-                language = db_user.language
-                # Cache it in context
-                context.user_data['language'] = language
-            else:
-                language = 'en'  # Default to English
-        finally:
-            db.close()
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("🏠 Feng Shui", callback_data='feng_shui'),
-            InlineKeyboardButton("🧠 MBTI", callback_data='mbti'),
-        ],
-        [
-            InlineKeyboardButton("🔮 I-Ching", callback_data='i_ching'),
-            InlineKeyboardButton("🌙 Ba Zi", callback_data='ba_zi'),
-        ],
-        [
-            InlineKeyboardButton("⭐ Zi Wei Dou Shu", callback_data='zi_wei'),
-        ]
-    ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if language == 'zh':
-        await update.message.reply_text(
-            "您好！我是您的个人中国玄学和人格分析顾问。"
-            "我想更好地了解您，以提供个性化的见解。\n\n"
-            "今天您想让我帮您什么？",
-            reply_markup=reply_markup
-        )
-    else:
-        await update.message.reply_text(
-            "Hi! I'm your personal consultant for Chinese metaphysics and personality analysis. "
-            "I'd like to get to know you better to provide personalized insights.\n\n"
-            "What would you like me to help you with today?",
-            reply_markup=reply_markup
-        )
-    
-    # Initialize the assessment data structure
-    context.user_data['assessment'] = {}
-    # Store the language in the assessment data
-    context.user_data['assessment']['language'] = language
-    
-    return SELECTING_TOPIC
+            await update.message.reply_text(
+                "Sorry, there was an error starting the assessment. Please try again with /assess or contact support."
+            )
+        except Exception as reply_error:
+            logger.error(f"ASSESS COMMAND: Couldn't send error message: {reply_error}")
+        
+        return ConversationHandler.END
 
 async def topic_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle the topic selection."""
@@ -949,6 +1002,9 @@ def create_application():
     builder.connect_timeout(30.0)
     builder.read_timeout(30.0)
     application = builder.build()
+    
+    # Add debug command to test basic functionality
+    application.add_handler(CommandHandler("debug", debug_command))
 
     # Add assessment conversation handler
     assessment_conv_handler = ConversationHandler(
@@ -981,10 +1037,23 @@ def create_application():
             ZI_WEI_BIRTHDATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, zi_wei.zi_wei_birthdate)],
             ZI_WEI_BIRTHTIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, zi_wei.zi_wei_birthtime)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_assessment)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_assessment),
+            CommandHandler("restart", restart_command),
+            # Add a default fallback for any command
+            MessageHandler(filters.COMMAND, cancel_assessment)
+        ],
+        per_message=False,  # Prevent multiple instances
+        name="assessment_conversation"
     )
     
-    application.add_handler(assessment_conv_handler)
+    # Using application.add_handler with a specific group for the conversation handler
+    # This ensures it doesn't conflict with other handlers
+    application.add_handler(assessment_conv_handler, group=1)
+    
+    # Add direct assessment handler as a fallback in case conversation handler fails
+    # Using a different group to prevent conflicts
+    application.add_handler(CommandHandler("assess_alt", start_assessment), group=2)
     
     # Add language handlers
     application.add_handler(CommandHandler("language", language_command))
@@ -1008,9 +1077,7 @@ def create_application():
     # Add restart command
     application.add_handler(CommandHandler("restart", restart_command))
     
-
-
-    # Default handler for other messages
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    # Default handler for other messages - use a specific group to ensure proper order
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo), group=3)
 
     return application
