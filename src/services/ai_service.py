@@ -1,6 +1,7 @@
 import logging
 import time
 import os
+from datetime import datetime
 from openai import AsyncOpenAI
 from ..config import OPENAI_API_KEY
 
@@ -148,6 +149,37 @@ class AIService:
     def _create_system_prompt(self, topic: str, language="en") -> str:
         """Create a system prompt based on the topic and language."""
         
+        # Get current date and time information
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_year = datetime.now().year
+        current_month = datetime.now().strftime("%B")
+        current_day = datetime.now().day
+        
+        # Calculate Chinese zodiac sign for the current year
+        zodiac_signs = ["Rat", "Ox", "Tiger", "Rabbit", "Dragon", "Snake", "Horse", "Goat", "Monkey", "Rooster", "Dog", "Pig"]
+        zodiac_signs_zh = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"]
+        
+        # Calculate the zodiac sign (using a simple formula - the Chinese New Year varies, but this is a good approximation)
+        zodiac_index = (current_year - 4) % 12
+        current_zodiac = zodiac_signs[zodiac_index]
+        current_zodiac_zh = zodiac_signs_zh[zodiac_index]
+        
+        # Create date information based on language
+        if language == "zh":
+            date_info = (
+                f"当前日期：{current_date}\n"
+                f"现在是{current_year}年，{current_month}月，{current_day}日。\n"
+                f"按照中国传统历法，当前是{current_zodiac_zh}年。\n"
+                f"请在回答中考虑这些时间信息。"
+            )
+        else:
+            date_info = (
+                f"Current date: {current_date}\n"
+                f"It is currently {current_month} {current_day}, {current_year}.\n"
+                f"According to the Chinese calendar, it is the Year of the {current_zodiac}.\n"
+                f"Please consider this temporal information in your responses."
+            )
+        
         # English system prompts
         en_prompts = {
             "feng_shui": (
@@ -230,8 +262,33 @@ class AIService:
         
         # Select the appropriate prompt set based on language
         prompts = zh_prompts if language == 'zh' else en_prompts
+        base_prompt = prompts.get(topic, prompts["general"])
         
-        return prompts.get(topic, prompts["general"])
+        # Add date information to the prompt
+        full_prompt = f"{base_prompt}\n\n{date_info}"
+        
+        return full_prompt
+
+    def _get_seasonal_information(self, language="en"):
+        """Get current seasonal information based on current date."""
+        month = datetime.now().month
+        northern_season = ""
+        
+        # Determine the season in the Northern Hemisphere
+        if 3 <= month <= 5:
+            northern_season = "Spring" if language == "en" else "春季"
+        elif 6 <= month <= 8:
+            northern_season = "Summer" if language == "en" else "夏季"
+        elif 9 <= month <= 11:
+            northern_season = "Autumn" if language == "en" else "秋季"
+        else:
+            northern_season = "Winter" if language == "en" else "冬季"
+            
+        # Format based on language
+        if language == "zh":
+            return f"在北半球，现在是{northern_season}。在南半球，季节相反。"
+        else:
+            return f"It is currently {northern_season} in the Northern Hemisphere. In the Southern Hemisphere, it's the opposite season."
     
     def _create_followup_prompt(self, query: str, context_info: str, language="en") -> str:
         """Create a prompt for follow-up questions with context."""
@@ -269,3 +326,11 @@ class AIService:
             logger.info(f"Reset chat session for user {user_id}")
             return True
         return False
+
+    def get_usage_stats(self):
+        """Get API usage statistics."""
+        return {
+            "total_tokens": self.total_tokens_used,
+            "api_calls": self.api_calls_count,
+            "uptime_seconds": int(time.time() - self.api_start_time)
+        }
