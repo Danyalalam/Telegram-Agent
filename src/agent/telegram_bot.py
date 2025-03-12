@@ -27,6 +27,96 @@ logger = logging.getLogger(__name__)
 ai_service = AIService()
 
 
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+async def show_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show or hide custom keyboard buttons."""
+    user_id = update.effective_user.id
+    
+    # Get user language preference 
+    language = context.user_data.get('language', 'en')
+    
+    # Check if we should show or hide buttons
+    show_buttons = True
+    if context.args and len(context.args) > 0:
+        show_arg = context.args[0].lower()
+        if show_arg in ['off', 'hide', 'remove']:
+            show_buttons = False
+    
+    if show_buttons:
+        # Create buttons based on language
+        if language == 'zh':
+            keyboard = [
+                ["🏠 风水", "🧠 MBTI", "🔮 易经"],
+                ["🌙 八字", "⭐ 紫微", "✨ 评估"],
+                ["📜 历史", "🔄 重置", "🌐 语言"]
+            ]
+            message = "按钮菜单已显示。您可以点击任何按钮来执行相应的命令。\n\n使用 /buttons off 来隐藏此菜单。"
+        else:
+            keyboard = [
+                ["🏠 Feng Shui", "🧠 MBTI", "🔮 I-Ching"],
+                ["🌙 Ba Zi", "⭐ Zi Wei", "✨ Assess"],
+                ["📜 History", "🔄 Reset", "🌐 Language"]
+            ]
+            message = "Button menu is now shown. You can tap any button to execute the corresponding command.\n\nUse /buttons off to hide this menu."
+        
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
+        )
+    else:
+        # Remove keyboard
+        reply_markup = ReplyKeyboardRemove()
+        
+        if language == 'zh':
+            message = "按钮菜单已隐藏。使用 /buttons 重新显示。"
+        else:
+            message = "Button menu is now hidden. Use /buttons to show it again."
+    
+    # Send message with or without keyboard
+    await update.message.reply_text(message, reply_markup=reply_markup)
+
+async def handle_button_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button presses from custom keyboard."""
+    text = update.message.text
+    
+    # Map button texts to commands
+    button_commands = {
+        # English buttons
+        "🏠 Feng Shui": "/fengshui",
+        "🧠 MBTI": "/mbti",
+        "🔮 I-Ching": "/iching",
+        "🌙 Ba Zi": "/bazi",
+        "⭐ Zi Wei": "/ziwei",
+        "✨ Assess": "/assess",
+        "📜 History": "/history",
+        "🔄 Reset": "/reset",
+        "🌐 Language": "/language",
+        
+        # Chinese buttons
+        "🏠 风水": "/fengshui",
+        "🧠 MBTI": "/mbti",
+        "🔮 易经": "/iching", 
+        "🌙 八字": "/bazi",
+        "⭐ 紫微": "/ziwei",
+        "✨ 评估": "/assess",
+        "📜 历史": "/history",
+        "🔄 重置": "/reset",
+        "🌐 语言": "/language"
+    }
+    
+    # Check if this is a button command
+    if text in button_commands:
+        # Change the message text to the actual command
+        update.message.text = button_commands[text]
+        
+        # Re-dispatch to the appropriate handler
+        await context.application.process_update(update)
+        return
+    
+    # If not a button command, pass through to regular message processing
+    await echo(update, context)
+
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Debug command to test basic bot functionality."""
     logger.info(f"DEBUG COMMAND: Received from user {update.effective_user.id}")
@@ -143,6 +233,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "   /subscribe off - Unsubscribe from daily tips\n"
             "❓ Just ask me any question related to these topics!"
         )
+        
+        keyboard = None
+        if language == 'zh':
+            keyboard = [
+                ["🏠 风水", "🧠 MBTI", "🔮 易经"],
+                ["🌙 八字", "⭐ 紫微", "✨ 评估"],
+                ["📜 历史", "🔄 重置", "🌐 语言"]
+            ]
+            button_text = "\n\n提示：使用 /buttons 命令可以显示或隐藏快捷按钮菜单！"
+        else:
+            keyboard = [
+                ["🏠 Feng Shui", "🧠 MBTI", "🔮 I-Ching"],
+                ["🌙 Ba Zi", "⭐ Zi Wei", "✨ Assess"],
+                ["📜 History", "🔄 Reset", "🌐 Language"]
+            ]
+            button_text = "\n\nTip: Use the /buttons command to show or hide a quick command menu!"
+
+        # Add buttons suggestion to the last message
+        await update.message.reply_text(button_text, reply_markup=ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
+        ))
 
 # Update the history_command function to support language selection
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1076,6 +1188,12 @@ def create_application():
     
     # Add restart command
     application.add_handler(CommandHandler("restart", restart_command))
+    
+    application.add_handler(CommandHandler("buttons", show_buttons_command))
+    
+    application.add_handler(MessageHandler(
+    filters.Regex(r'^[🏠🧠🔮🌙⭐✨📜🔄🌐]'), handle_button_text
+    ), group=2)
     
     # Default handler for other messages - use a specific group to ensure proper order
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo), group=3)
